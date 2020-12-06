@@ -20,6 +20,7 @@ static void InterruptHandler(int signo)
   interrupt_received = true;
 }
 
+#define handle_error_en(en, msg) do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
 #define DISP_TYPE 1     //0 = 128x64, Addr-Type 3; 1 = 2x64x64;
 #define PATH_TO_FONTS "/home/pi/rpi-rgb-led-matrix/fonts/"
 #define BUF_SIZE 20
@@ -43,7 +44,7 @@ static void co2thread_cleanup(void *arg)
 
 static void *co2thread_thread(void *arg)
 {
-    int i = 0, n, degC = 0, undok = 0;
+    int n, degC = 0, undok = 0;
     struct termios tty;
     unsigned char msgReadCO2[] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
     unsigned char read_buf[16];
@@ -84,8 +85,6 @@ static void *co2thread_thread(void *arg)
 
     while (!interrupt_received) 
     {
-        i++;
-
         //CO2-Messwert abfragen:
         write(serial_port, msgReadCO2, sizeof(msgReadCO2));
         n = read(serial_port, &read_buf, sizeof(read_buf));
@@ -100,6 +99,9 @@ static void *co2thread_thread(void *arg)
         snprintf(Data.buf[7], BUF_SIZE, "%3d°C   ", degC);
         snprintf(Data.buf[9], BUF_SIZE, "%5d    ", undok);
         sleep(10);
+
+        //BME280 abfragen (über BMP280 IIO driver):
+
     }
 
     pthread_cleanup_pop(1);
@@ -149,15 +151,13 @@ int main(int argc, char *argv[])
     pthread_t pthr;
     time_t mytime;
     struct tm *timeinfo;
+    int s;
 
     signal(SIGTERM, InterruptHandler);
     signal(SIGINT, InterruptHandler);
 
-    if (pthread_create(&pthr, NULL, &co2thread_thread, &Data) != 0)
-    {
-        fprintf(stderr, "Konnte co2thread-Thread nicht erzeugen\n");
-        exit(EXIT_FAILURE);
-    }
+    if ((s = pthread_create(&pthr, NULL, &co2thread_thread, &Data)) != 0)
+        handle_error_en(s, "pthread_create co2thread");
 
     RGBMatrix::Options matrix_options;
     rgb_matrix::RuntimeOptions runtime_opt;
@@ -190,21 +190,18 @@ int main(int argc, char *argv[])
     //Laden Font klein:
     sprintf(bdf_font_file, "%s6x10.bdf", PATH_TO_FONTS);
     rgb_matrix::Font fontKlein;
-    if (!fontKlein.LoadFont(bdf_font_file)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
-    }
+    if (!fontKlein.LoadFont(bdf_font_file)) 
+        handle_error_en(0, bdf_font_file);
     //Laden Font Mittel:
     sprintf(bdf_font_file, "%s8x13.bdf", PATH_TO_FONTS);
     rgb_matrix::Font fontMittel;
-    if (!fontMittel.LoadFont(bdf_font_file)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
-    }
+    if (!fontMittel.LoadFont(bdf_font_file))
+        handle_error_en(0, bdf_font_file);
     //Laden Font Groß:
     sprintf(bdf_font_file, "%s8x13B.bdf", PATH_TO_FONTS);
     rgb_matrix::Font fontGross;
-    if (!fontGross.LoadFont(bdf_font_file)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
-    }
+    if (!fontGross.LoadFont(bdf_font_file))
+        handle_error_en(0, bdf_font_file);
 
     Color colRot(224, 0, 0);
     Color colRotD(42, 12, 12);
@@ -237,7 +234,7 @@ int main(int argc, char *argv[])
 
         //CO2:
         strncpy(text, Data.buf[4], BUF_SIZE);
-        Color *pColor = co2 >= 2500 ? &colRot : co2 >= 2000 ? &colUViolett : co2 >= 1000 ? &colGelb : &colGruen;
+        Color *pColor = co2 >= 2000 ? &colRot : co2 >= 1500 ? &colUViolett : co2 >= 1000 ? &colTuerkis : &colGruen;
         WriteText(canvas, x+2, y + 32, fontGross, text, NULL, &bg_col_Schwarz, pColor);
 
         //Uhrzeit/Schweißzeit:
@@ -263,7 +260,8 @@ int main(int argc, char *argv[])
     // Finished. Shut down the RGB matrix.
     canvas->Clear();
     delete canvas;
-//    pthread_join(pthr, NULL);
+    if ((s = pthread_join(pthr, NULL)) != 0)
+        handle_error_en(s, "pthread_join co2_thread");
     return 0;
 }
 
