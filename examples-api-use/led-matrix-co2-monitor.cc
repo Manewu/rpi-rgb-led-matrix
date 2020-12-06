@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <errno.h>
+#include <fstream>      // std::ifstream
 
 using namespace rgb_matrix;
 
@@ -20,7 +21,7 @@ static void InterruptHandler(int signo)
   interrupt_received = true;
 }
 
-#define handle_error_en(en, msg) do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
+#define handle_error_en(en, msg) do { if (errno) errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
 #define DISP_TYPE 1     //0 = 128x64, Addr-Type 3; 1 = 2x64x64;
 #define PATH_TO_FONTS "/home/pi/rpi-rgb-led-matrix/fonts/"
 #define BUF_SIZE 20
@@ -28,10 +29,10 @@ static void InterruptHandler(int signo)
 
 struct Data
 {
-    char buf[BUF_NUM][BUF_SIZE] = { "J# 126", "Tür rechts",
-                                    "P#64321", "SpeedCold",
-                                    "CO2: 1023 ppm", "", "13:25:33",
-                                    "22,3 °C", "E13-2", "20,4V" };
+    char buf[BUF_NUM][BUF_SIZE] = { "  ", "  ",
+                                    "  ", "  ",
+                                    "  ", "  ", "  ",
+                                    "  ", "  ", "  " };
 } Data;
 
 int serial_port;
@@ -44,7 +45,8 @@ static void co2thread_cleanup(void *arg)
 
 static void *co2thread_thread(void *arg)
 {
-    int n, degC = 0, undok = 0;
+    int n;
+    double d_temp, bme_temp = 0.0, bme_humidity = 0.0, bme_pressure = 0.0;
     struct termios tty;
     unsigned char msgReadCO2[] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
     unsigned char read_buf[16];
@@ -83,6 +85,17 @@ static void *co2thread_thread(void *arg)
         printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
     }
 
+    //Test BME280 Abfrage (über BMP280 IIO driver):
+    std::ifstream ifs_Temperature ("/sys/bus/iio/devices/iio:device0/in_temp_input", std::ifstream::in);
+    if (!ifs_Temperature) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_temp_input not found");
+    ifs_Temperature.close();
+    std::ifstream ifs_Pressure ("/sys/bus/iio/devices/iio:device0/in_pressure_input", std::ifstream::in);
+    if (!ifs_Pressure) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_pressure_input not found");
+    ifs_Pressure.close();
+    std::ifstream ifs_Humidity ("/sys/bus/iio/devices/iio:device0/in_humidityrelative_input", std::ifstream::in);
+    if (!ifs_Humidity) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_humidityrelative_input not found");
+    ifs_Humidity.close();
+
     while (!interrupt_received) 
     {
         //CO2-Messwert abfragen:
@@ -91,17 +104,34 @@ static void *co2thread_thread(void *arg)
         if (n == 9 && read_buf[0] == 0xFF && read_buf[1] == 0x86)
         {
             co2 = read_buf[2] * 256 + read_buf[3];
-            degC = read_buf[4] - 40;
-            undok = read_buf[6] * 256 + read_buf[7];
+//            degC = read_buf[4] - 40;
+//            undok = read_buf[6] * 256 + read_buf[7];
         }
 
-        snprintf(Data.buf[4], BUF_SIZE, "CO2: %4d ppm   ", co2);
-        snprintf(Data.buf[7], BUF_SIZE, "%3d°C   ", degC);
-        snprintf(Data.buf[9], BUF_SIZE, "%5d    ", undok);
+        snprintf(Data.buf[4], BUF_SIZE, "%4d", co2);
+//        snprintf(Data.buf[7], BUF_SIZE, "%3d°C   ", degC);
         sleep(10);
 
         //BME280 abfragen (über BMP280 IIO driver):
+        std::ifstream ifs_Pressure ("/sys/bus/iio/devices/iio:device0/in_pressure_input", std::ifstream::in);
+        ifs_Pressure >> d_temp;
+        ifs_Pressure.close();
+        bme_pressure = d_temp * 10.0;     //-> Luftdruck in hPa
+        snprintf(Data.buf[3], BUF_SIZE, "%4.0f", bme_pressure + 0.5);
 
+        std::ifstream ifs_Temperature ("/sys/bus/iio/devices/iio:device0/in_temp_input", std::ifstream::in);
+        ifs_Temperature >> d_temp;
+        ifs_Temperature.close();        
+        bme_temp = d_temp / 1000.0;       //-> Temperatur in °C
+        snprintf(Data.buf[7], BUF_SIZE, "%2.1f°C ", bme_temp);
+
+        std::ifstream ifs_Humidity ("/sys/bus/iio/devices/iio:device0/in_humidityrelative_input", std::ifstream::in);
+        ifs_Humidity >> d_temp;
+        ifs_Humidity.close();
+        bme_humidity = d_temp / 1000.0;   //-> Rel. Luftfeuchte in %
+        snprintf(Data.buf[8], BUF_SIZE, "%.0f%%", bme_humidity + 0.5);
+
+        sleep(10);
     }
 
     pthread_cleanup_pop(1);
@@ -203,13 +233,13 @@ int main(int argc, char *argv[])
     if (!fontGross.LoadFont(bdf_font_file))
         handle_error_en(0, bdf_font_file);
 
-    Color colRot(224, 0, 0);
+    Color colRot(120, 25, 0);
     Color colRotD(42, 12, 12);
-    Color colGruen(0, 192, 0);
-    Color colBlau(0, 0, 224);
-    Color colGelb(175, 175, 0);
-    Color colTuerkis(0, 175, 175);
-    Color colUViolett(175, 0, 175);
+    Color colGruen(0, 150, 0);
+    Color colBlau(0, 0, 145);
+    Color colGelb(145, 145, 0);
+    Color colTuerkis(0, 145, 145);
+    Color colUViolett(145, 0, 145);
 
     Color bg_color(0, 8, 0);
     Color bg_col_Schwarz(0, 0, 0);
@@ -226,33 +256,34 @@ int main(int argc, char *argv[])
         //Datum:
         x = 0; y = 0;
         strftime(text, BUF_SIZE, "%a %b %e %Y", timeinfo);
-        WriteText(canvas, x+5, y, fontMittel, text, NULL, &bg_col_Schwarz, &colGelb);
+        WriteText(canvas, x+4, y-1, fontMittel, text, NULL, &bg_col_Schwarz, &colGelb);
 
         //Uhrzeit:
         snprintf(text, BUF_SIZE, "%02d:%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-        WriteText(canvas, x + 32, y + 16, fontGross, text, NULL, &bg_col_Schwarz, &colGelb);
+        WriteText(canvas, x + 27, y + 12, fontGross, text, NULL, &bg_col_Schwarz, &colGelb);
 
         //CO2:
+        WriteText(canvas, x+104, y + 14, fontMittel, (char *)"CO2", NULL, &bg_col_Schwarz, &colGruen);
         strncpy(text, Data.buf[4], BUF_SIZE);
         Color *pColor = co2 >= 2000 ? &colRot : co2 >= 1500 ? &colUViolett : co2 >= 1000 ? &colTuerkis : &colGruen;
-        WriteText(canvas, x+2, y + 32, fontGross, text, NULL, &bg_col_Schwarz, pColor);
+        WriteText(canvas, x+69, y + 25, fontGross, text, NULL, &bg_col_Schwarz, pColor);
+        WriteText(canvas, x+104, y + 25, fontGross, (char *) "ppm", NULL, &bg_col_Schwarz, pColor);
 
-        //Uhrzeit/Schweißzeit:
-//        strncpy(text, Data.buf[6], BUF_SIZE);
-//        snprintf(text, BUF_SIZE, "%02d:%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-//        WriteText(canvas, x + 78, y + 33, fontKlein, text, NULL, &bg_col_Schwarz, &colTuerkis);
+        //Luftdruck:
+        strncpy(text, Data.buf[3], BUF_SIZE);
+        WriteText(canvas, x+1, y + 25, fontGross, text, NULL, &bg_col_Schwarz, &colBlau);
+        WriteText(canvas, x+36, y + 25, fontGross, (char *) "hPa", NULL, &bg_col_Schwarz, &colBlau);
+
+        //Message
+        WriteText(canvas, x + 20, y + 38, fontGross, (char *) "Message...", NULL, &bg_col_Schwarz, &colGelb);
 
         //Temperatur:
         strncpy(text, Data.buf[7], BUF_SIZE);
-        WriteText(canvas, x+2, y + 51, fontGross, text, NULL, &bg_col_Schwarz, &colGruen);
+        WriteText(canvas, x+1, y + 52, fontGross, text, NULL, &bg_col_Schwarz, &colRot);
 
-        //Fehler:
+        //Humidity:
         strncpy(text, Data.buf[8], BUF_SIZE);
-//        WriteText(canvas, x + 43, y + 51, fontGross, text, NULL, &bg_col_Schwarz, &colRotD);
-
-        //undok. Wert:
-        strncpy(text, Data.buf[9], BUF_SIZE);
-        WriteText(canvas, x + 79, y + 51, fontMittel, text, NULL, &bg_col_Schwarz, &colRotD);
+        WriteText(canvas, x + 60, y + 52, fontGross, text, NULL, &bg_col_Schwarz, &colRot);
 
         usleep(200000);    //Refresh-Rate
     }
