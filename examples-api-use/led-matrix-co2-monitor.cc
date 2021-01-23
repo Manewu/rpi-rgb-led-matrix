@@ -87,13 +87,13 @@ static void *co2thread_thread(void *arg)
 
     //Test BME280 Abfrage (über BMP280 IIO driver):
     std::ifstream ifs_Temperature ("/sys/bus/iio/devices/iio:device0/in_temp_input", std::ifstream::in);
-    if (!ifs_Temperature) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_temp_input not found");
+    if (!ifs_Temperature) printf("/sys/bus/iio/devices/iio:device0/in_temp_input not found");
     ifs_Temperature.close();
     std::ifstream ifs_Pressure ("/sys/bus/iio/devices/iio:device0/in_pressure_input", std::ifstream::in);
-    if (!ifs_Pressure) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_pressure_input not found");
+    if (!ifs_Pressure) printf("/sys/bus/iio/devices/iio:device0/in_pressure_input not found");
     ifs_Pressure.close();
     std::ifstream ifs_Humidity ("/sys/bus/iio/devices/iio:device0/in_humidityrelative_input", std::ifstream::in);
-    if (!ifs_Humidity) handle_error_en(0, "/sys/bus/iio/devices/iio:device0/in_humidityrelative_input not found");
+    if (!ifs_Humidity) printf("/sys/bus/iio/devices/iio:device0/in_humidityrelative_input not found");
     ifs_Humidity.close();
 
     while (!interrupt_received) 
@@ -117,7 +117,7 @@ static void *co2thread_thread(void *arg)
         ifs_Pressure >> d_temp;
         ifs_Pressure.close();
         bme_pressure = d_temp * 10.0;     //-> Luftdruck in hPa
-        snprintf(Data.buf[3], BUF_SIZE, "%4.0f", bme_pressure + 0.5);
+        snprintf(Data.buf[3], BUF_SIZE, "%4.0f ", bme_pressure + 0.5);
 
         std::ifstream ifs_Temperature ("/sys/bus/iio/devices/iio:device0/in_temp_input", std::ifstream::in);
         ifs_Temperature >> d_temp;
@@ -274,8 +274,8 @@ int main(int argc, char *argv[])
         WriteText(canvas, x+1, y + 25, fontGross, text, NULL, &bg_col_Schwarz, &colBlau);
         WriteText(canvas, x+36, y + 25, fontGross, (char *) "hPa", NULL, &bg_col_Schwarz, &colBlau);
 
-        //Message
-        WriteText(canvas, x + 20, y + 38, fontGross, (char *) "Message...", NULL, &bg_col_Schwarz, &colGelb);
+        //Message (bei fontGross besser y+38)
+        WriteText(canvas, x + 1, y + 39, fontKlein, (char *) "don't worry, be happy", NULL, &bg_col_Schwarz, &colGelb);
 
         //Temperatur:
         strncpy(text, Data.buf[7], BUF_SIZE);
